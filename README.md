@@ -225,6 +225,38 @@ tokio::spawn(async {
 
 各結果には、収集した時点のアプリの git コミットも表示されます。改善前後の比較に使えます。
 
+### 4. 結果を AI に渡す（レポート API）
+
+1 回の計測（`/api/group/collect` で集めた 1 グループ）の httplog / slowlog / pprof / memo を、1 つの Markdown にまとめて返します。合計時間の多い順に上位だけを載せるので、そのまま AI に渡せます。
+
+```sh
+# 最新の計測結果
+curl "http://<pprotein のホスト>:9000/api/report/latest"
+
+# 前回の計測との差分も付ける。上位 20 件まで
+curl "http://<pprotein のホスト>:9000/api/report/latest?compare=prev&top=20"
+
+# Claude Code ならそのまま読ませられる
+! curl -s "http://localhost:9000/api/report/latest?compare=prev"
+```
+
+| パラメータ | 内容 |
+|---|---|
+| `:group` | グループ ID。`latest` で最新 |
+| `top` | 各表の行数（既定 15） |
+| `compare` | `prev` で直前のグループと比べる。グループ ID も指定できる |
+| `format` | `json` で JSON を返す（既定は Markdown） |
+
+レポートに入る内容:
+
+- **HTTP**: エンドポイント別の合計時間（Sum）の多い順。全体に占める割合、件数、平均、P99、4xx / 5xx の件数
+- **Slow queries**: クエリ別の合計時間の多い順。割合、件数、平均、平均の参照行数（Rows examined）
+- **Profile**: 関数別の flat（関数自身の時間）と cum（呼び出し先を含む時間）の上位
+- **Diff**（`compare` 指定時）: 前回からの変化が大きい順。マイナスが改善
+- memo、git コミット、処理中・失敗で集計に入らなかったもの
+
+グループの一覧は `GET /api/report` で取れます（新しい順）。
+
 ## Rust 版の制限
 
 - 計測できるのは CPU プロファイルのみです（ヒープなどは非対応）。

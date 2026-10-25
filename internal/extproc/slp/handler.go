@@ -14,8 +14,9 @@ import (
 
 type (
 	handler struct {
-		opts   *collect.Options
-		config *persistent.Handler
+		opts      *collect.Options
+		config    *persistent.Handler
+		collector *collect.Collector
 	}
 )
 
@@ -39,10 +40,17 @@ func NewHandler(opts *collect.Options, store storage.Storage) (*handler, error) 
 func (h *handler) Register(g *echo.Group) error {
 	h.config.RegisterHandlers(g.Group("/config"))
 
-	if err := extproc.NewHandler(&processor{confPath: h.config.GetPath()}, h.opts).Register(g); err != nil {
+	ext := extproc.NewHandler(&processor{confPath: h.config.GetPath()}, h.opts)
+	if err := ext.Register(g); err != nil {
 		return fmt.Errorf("failed to register extproc handlers: %w", err)
 	}
+	h.collector = ext.Collector()
 	return nil
+}
+
+// Collector は Register 後に有効になる。
+func (h *handler) Collector() *collect.Collector {
+	return h.collector
 }
 
 func (h *handler) sanitize(raw []byte) ([]byte, error) {

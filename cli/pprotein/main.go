@@ -12,6 +12,7 @@ import (
 	"github.com/kaz/pprotein/internal/extproc/slp"
 	"github.com/kaz/pprotein/internal/memo"
 	"github.com/kaz/pprotein/internal/pprof"
+	"github.com/kaz/pprotein/internal/report"
 	"github.com/kaz/pprotein/internal/storage"
 	"github.com/kaz/pprotein/view"
 	"github.com/labstack/echo/v4"
@@ -53,7 +54,8 @@ func start() error {
 		Store:    store,
 		EventHub: hub,
 	}
-	if err := pprof.NewHandler(pprofOpts).Register(api.Group("/pprof")); err != nil {
+	pprofHandler := pprof.NewHandler(pprofOpts)
+	if err := pprofHandler.Register(api.Group("/pprof")); err != nil {
 		return err
 	}
 
@@ -91,7 +93,8 @@ func start() error {
 		Store:    store,
 		EventHub: hub,
 	}
-	if err := memo.NewHandler(memoOpts).Register(api.Group("/memo")); err != nil {
+	memoHandler := memo.NewHandler(memoOpts)
+	if err := memoHandler.Register(api.Group("/memo")); err != nil {
 		return err
 	}
 
@@ -100,6 +103,13 @@ func start() error {
 		return err
 	}
 	grp.RegisterHandlers(api.Group("/group"))
+
+	report.NewHandler(&report.Sources{
+		HTTPLog: alpHandler.Collector(),
+		SlowLog: slpHandler.Collector(),
+		PProf:   pprofHandler.Collector(),
+		Memo:    memoHandler.Collector(),
+	}).RegisterHandlers(api.Group("/report"))
 
 	return e.Start(":" + port)
 }
