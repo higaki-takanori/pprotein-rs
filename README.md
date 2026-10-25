@@ -258,18 +258,91 @@ ssh -L 8080:localhost:8080 -L 19000:localhost:19000 isucon@<計測対象>
 curl http://<pprotein のホスト>:9000/api/group/collect
 ```
 
-ISUCON ではベンチマーカーが最初に叩く初期化エンドポイント（`POST /initialize` など）の中でこのリクエストを送ると、毎回自動で計測できます。
+手で始める場合は、`curl` の代わりに画面のグループ一覧にある **Collect** ボタンでも同じことができます。各一覧（pprof / httplog / slowlog）から個別に始めることもできます。
 
-```rust
-// 例: Rust アプリの initialize ハンドラ内で（reqwest を使う場合）
-tokio::spawn(async {
-    let _ = reqwest::get("http://<pprotein のホスト>:9000/api/group/collect").await;
-});
+#### initialize で自動的に計測を始める
+
+ISUCON のベンチマーカーは、毎回最初にアプリの初期化エンドポイント（`POST /initialize` など）を呼びます。その中で上の collect を送れば、ポータルでベンチマークを実行するだけで計測も始まります。ベンチマークサーバーには手を加えず、変えるのは自分たちのアプリだけです。
+
+```
+ポータルでベンチマーク実行
+  → ベンチマーカーがアプリに POST /initialize
+    → アプリが pprotein に GET /api/group/collect（ここを追加する）
+      → Duration 秒間の計測が始まる
 ```
 
-ただし pprotein を手元の PC で動かしている場合、普通はサーバーから手元の 9000 番には届きません。その場合はベンチマーク開始と同時に、手元で上の `curl` を実行してください。
+**1. アプリから pprotein に届くようにする**
 
-画面の各一覧から個別に収集を始めることもできます。
+| pprotein の置き場所 | アプリから見た URL |
+| --- | --- |
+| アプリと同じサーバー | `http://localhost:9000/api/group/collect` |
+| 別のサーバー（監視用や競技サーバーの 1 台） | `http://<そのサーバーのプライベート IP>:9000/api/group/collect` |
+| 手元の PC | 下の `ssh -R` でつないで `http://localhost:9000/api/group/collect` |
+
+手元の PC で動かしている場合、普通はサーバーから手元の 9000 番には届きません。SSH に `-R` を付けると、サーバーの `localhost:9000` が手元の pprotein につながります（SSH を切るとつながらなくなります）。
+
+```sh
+ssh -R 9000:localhost:9000 \
+    -L 8080:localhost:8080 -L 19000:localhost:19000 \
+    isucon@<計測対象>
+```
+
+サーバー上で `curl -i http://localhost:9000/api/group/collect` が `200 OK` を返せばつながっています（このとき空のグループが 1 つできます）。
+
+**2. initialize ハンドラに追加する**
+
+Rust（axum / actix-web）の例です。`Cargo.toml` に reqwest を追加します。
+
+```toml
+[dependencies]
+reqwest = { version = "0.12", default-features = false }
+```
+
+```rust
+async fn initialize(/* ... */) -> impl IntoResponse {
+    // 既存の初期化処理（DB のリセットなど）
+    // ...
+
+    // 計測開始。ベンチマークを待たせないよう裏で送り、失敗しても無視する
+    tokio::spawn(async {
+        let Ok(url) = std::env::var("PPROTEIN_COLLECT_URL") else { return };
+        let Ok(client) = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+        else { return };
+        let _ = client.get(url).send().await;
+    });
+
+    Json(json!({ "language": "rust" }))
+}
+```
+
+Go の場合:
+
+```go
+go func() {
+    url := os.Getenv("PPROTEIN_COLLECT_URL")
+    if url == "" {
+        return
+    }
+    c := http.Client{Timeout: 3 * time.Second}
+    if resp, err := c.Get(url); err == nil {
+        resp.Body.Close()
+    }
+}()
+```
+
+アプリの環境変数に URL を設定します（systemd ならユニットファイルの `[Service]` に `Environment=PPROTEIN_COLLECT_URL=http://localhost:9000/api/group/collect` を追記するか、アプリが読む env ファイルに書きます）。設定したらアプリを再起動します。
+
+- **裏で送って待たない**: initialize の応答が遅れるとベンチマークが失敗することがあります。pprotein 側もリクエストを受けたらすぐ返し、収集は裏で進めます。
+- **タイムアウトを付け、エラーは無視する**: pprotein が止まっていてもアプリに影響しないようにします。
+- **URL は環境変数にする**: 環境変数を消せば計測が止まります。最終計測の前は消すか、このコードごと外してください。
+
+**3. Duration を調整する**
+
+initialize は負荷がかかる前に呼ばれるので、計測はそこから始まります。setting の `Duration` はベンチマークの実行時間より少し長めにします（例: ベンチマークが 60 秒なら 70 秒）。短いと終盤が計測から外れます。
+
+前の計測が終わる前に次のベンチマークを始めると、計測が重なります。`Duration` 秒たってから次を実行してください。
 
 ### 3. 結果を見る
 
@@ -369,6 +442,7 @@ integration を組み込んだままだと、アプリに `/debug/pprof/*` が�
 
 - Rust: `Cargo.toml` の `pprotein-integration` と、ルーターに追加した 1 行（`.merge(pprotein_integration::axum::router())` / `.configure(pprotein_integration::actix::configure)`）を消す。`[profile.release]` の `debug = 1` も不要なら消す
 - Go: `echov4.Integrate(e)` などの呼び出しと import を消す
+- initialize に collect を追加していた場合は、そのコードと環境変数 `PPROTEIN_COLLECT_URL` も消す（Rust なら `reqwest` が不要になれば `Cargo.toml` からも消す）
 
 ### 3. pprotein 側の登録を消す
 
