@@ -3,3 +3,4 @@
 /pprotein-agent
 /data/
 /dist/
+/integration/rust/target/

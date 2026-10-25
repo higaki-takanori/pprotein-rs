@@ -8,3 +8,5 @@ data
 
 view/node_modules
 view/dist
+
+integration/rust/target
