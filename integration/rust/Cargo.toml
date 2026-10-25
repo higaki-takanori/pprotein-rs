@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "pprotein integration for Rust web apps (CPU profiling via pprof-rs)"
 license = "MIT"
-repository = "https://github.com/kaz/pprotein"
+repository = "https://github.com/higaki-takanori/pprotein-rs"
 
 [features]
 default = []

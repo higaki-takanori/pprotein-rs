@@ -10,9 +10,9 @@ Rust 製の Web アプリから pprotein で CPU プロファイルを収集す�
 ```toml
 [dependencies]
 # axum の場合
-pprotein-integration = { git = "https://github.com/kaz/pprotein", features = ["axum"] }
+pprotein-integration = { git = "https://github.com/higaki-takanori/pprotein-rs", features = ["axum"] }
 # actix-web の場合
-# pprotein-integration = { git = "https://github.com/kaz/pprotein", features = ["actix"] }
+# pprotein-integration = { git = "https://github.com/higaki-takanori/pprotein-rs", features = ["actix"] }
 
 # 関数名をプロファイルに出すため、release ビルドにもデバッグ情報を残す
 [profile.release]
@@ -34,6 +34,19 @@ App::new()
     .configure(pprotein_integration::actix::configure)
     .route("/", web::get().to(handler))
 ```
+
+git 依存はリポジトリ内のクレートを自動で探すため、サブディレクトリの指定は不要です。
+ブランチやコミットを固定したい場合は `branch = "..."` / `rev = "..."` を追加してください。
+
+## 計測までの流れ
+
+1. 上記のとおりアプリに組み込み、`cargo build --release` で起動する
+2. 動作確認: `curl -o profile.pb.gz 'http://localhost:<アプリのポート>/debug/pprof/profile?seconds=5'` が 200 で返ること
+3. pprotein の setting 画面で、`Type: "pprof"` の URL にアプリの `/debug/pprof/profile` を登録する（下の httplog / slowlog の例を参照）
+4. ベンチマーク開始時に `curl http://<pprotein のホスト>:9000/api/group/collect` を叩く
+5. pprotein の画面で Flame Graph / Top を見る
+
+pprotein 本体の起動方法などは、リポジトリ直下の [README](../../README.md) を参照してください。
 
 ## エンドポイント
 
