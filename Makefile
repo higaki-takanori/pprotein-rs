@@ -12,6 +12,9 @@ run-agent:
 .PHONY: build
 build: pprotein pprotein-agent
 
+# 出力ファイル名と同じターゲットだが、ソース変更を反映するため毎回ビルドする（Go のキャッシュで差分のみ）
+.PHONY: pprotein pprotein-agent view/dist
+
 pprotein: view/dist
 	go build -trimpath -ldflags="-w -s" ./cli/pprotein
 
@@ -25,9 +28,11 @@ GOARCH ?= amd64
 agent-linux:
 	GOOS=linux GOARCH=$(GOARCH) CGO_ENABLED=0 go build -trimpath -ldflags="-w -s" -o pprotein-agent-linux-$(GOARCH) ./cli/pprotein-agent
 
-view/dist:
-	npm --prefix view ci
+view/dist: view/node_modules
 	npm --prefix view run build
+
+view/node_modules: view/package-lock.json
+	npm --prefix view ci
 
 .PHONY: clean
 clean:
