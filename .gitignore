@@ -1,6 +1,7 @@
 /pprotein
 /pprotein-mock
 /pprotein-agent
+/pprotein-agent-linux-*
 /data/
 /dist/
 /integration/rust/target/

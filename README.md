@@ -23,15 +23,36 @@ Rust アプリでは [pprof-rs](https://github.com/tikv/pprof-rs) を使って G
                                   └────────────────────────────────────┘
 ```
 
-- **pprotein**: 収集・解析・閲覧を行う本体。計測対象とは別のサーバーに置くのがおすすめです。
+- **pprotein**: 収集・解析・閲覧を行う本体。計測対象とは別のマシン（手元の PC や監視用サーバー）に置くのがおすすめです。
 - **pprotein-agent**: nginx / MySQL のログを配信する小さなサーバー。計測対象サーバーで動かします。
 - **integration**: アプリに組み込んでプロファイルを返すライブラリ（Go / Rust）。
+
+### どこで何を動かすか
+
+`pprotein` と `pprotein-agent` は役割が決まっています。入れ替えては使えません。
+
+| 置き場所 | 動かすもの | 必要なもの |
+| --- | --- | --- |
+| 手元の PC（または監視用サーバー） | `pprotein` | graphviz・alp・slp |
+| 計測対象サーバー | `pprotein-agent` | nginx / MySQL のログファイル |
+| 計測対象サーバー | アプリ（integration 組み込み済み） | — |
+
+pprotein は**取りに行く（pull）方式**です。pprotein から計測対象サーバーのアプリ（例: 8080）と pprotein-agent（19000）にアクセスできる必要があります。計測対象サーバーからは何も送りません。
 
 ## 導入方法
 
 ### 1. pprotein 本体を起動する
 
-ビルドには Go と Node.js（npm）が必要です。解析には `alp`・`slp`・`graphviz` を使います。
+ビルドには Go と Node.js（npm）が必要です。解析には `alp`・`slp`・`graphviz` を使うので、**pprotein を動かすマシン**に入れておきます。
+
+```sh
+# macOS の例
+brew install graphviz
+go install github.com/tkuchiki/alp/cmd/alp@latest
+go install github.com/tkuchiki/slp/cmd/slp@latest
+```
+
+> `Could not execute dot; may need to install graphviz.` と出る場合は、graphviz が入っていません。インストール後に pprotein を再起動してください。
 
 ```sh
 git clone https://github.com/higaki-takanori/pprotein-rs.git
@@ -51,9 +72,48 @@ docker run -p 9000:9000 -v $(pwd)/data:/opt/pprotein/data pprotein
 
 ### 2. 計測対象サーバーで pprotein-agent を起動する
 
+`make build` で作ったバイナリは手元の OS 向けです（Mac なら macOS 用）。そのままサーバーにコピーしても動かないので、サーバーの OS / CPU に合わせてビルドし直してから送ります。
+
+```sh
+# 手元で Linux 向けにビルド → pprotein-agent-linux-amd64 ができる
+make agent-linux
+# サーバーが ARM の場合 → pprotein-agent-linux-arm64
+make agent-linux GOARCH=arm64
+
+# サーバーへ送る
+scp pprotein-agent-linux-amd64 isucon@<計測対象>:~/pprotein-agent
+```
+
+サーバーの CPU は `uname -m` で確認できます（`x86_64` → `amd64`、`aarch64` → `arm64`）。
+
+サーバーで起動します。nginx / MySQL のログを読むため、読み取り権限のあるユーザーで動かしてください。
+
 ```sh
 ./pprotein-agent    # :19000 で起動（PORT 環境変数で変更可）
 ```
+
+ベンチマークのたびに起動し直さなくて済むよう、systemd に登録しておくと便利です。
+
+```ini
+# /etc/systemd/system/pprotein-agent.service
+[Unit]
+Description=pprotein-agent
+
+[Service]
+ExecStart=/home/isucon/pprotein-agent
+WorkingDirectory=/home/isucon/webapp
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now pprotein-agent
+```
+
+`WorkingDirectory` はアプリの git リポジトリにしておくと、コミット情報が結果に表示されます。
 
 ログファイルの場所は環境変数で変更できます。
 
@@ -124,6 +184,16 @@ pprotein の画面（`http://<pprotein のホスト>:9000`）の **setting** で
 - `Duration` は計測する秒数です。ベンチマークの実行時間に合わせてください。
 - サーバーが複数台ある場合は `Label` を変えて並べます。
 
+#### 手元の PC で pprotein を動かす場合
+
+計測対象サーバーの 8080 / 19000 番ポートが外から開いていない場合は、SSH のポートフォワードで手元につなぎます。
+
+```sh
+ssh -L 8080:localhost:8080 -L 19000:localhost:19000 isucon@<計測対象>
+```
+
+この場合、setting の `URL` は `http://localhost:8080/...`、`http://localhost:19000/...` を指定します。サーバーが複数台なら、手元のポート番号を台ごとに変えます（例: `-L 18080:localhost:8080`）。
+
 ### 2. 計測を開始する
 
 ベンチマーク開始と同時に、登録したすべての対象の収集を始めます。
@@ -140,6 +210,8 @@ tokio::spawn(async {
     let _ = reqwest::get("http://<pprotein のホスト>:9000/api/group/collect").await;
 });
 ```
+
+ただし pprotein を手元の PC で動かしている場合、普通はサーバーから手元の 9000 番には届きません。その場合はベンチマーク開始と同時に、手元で上の `curl` を実行してください。
 
 画面の各一覧から個別に収集を始めることもできます。
 
