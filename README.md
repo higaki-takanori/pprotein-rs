@@ -123,7 +123,63 @@ sudo systemctl enable --now pprotein-agent
 | `PPROTEIN_SLOWLOG` | `/var/log/mysql/mysql-slow.log` |
 | `PPROTEIN_GIT_REPOSITORY` | `.`（コミット情報の取得元） |
 
-nginx のログは alp が読める LTSV 形式で出力しておく必要があります。
+#### nginx / MySQL のログを出す
+
+pprotein-agent はログファイルを読むだけなので、nginx と MySQL 側でログを出す設定が必要です。設定例は `mock/nginx.conf` / `mock/mysqld.cnf` にもあります。
+
+**nginx**: alp が読める LTSV 形式でアクセスログを出します。`/etc/nginx/nginx.conf` の `http { ... }` 内にある既存の `access_log` を置き換えます。
+
+```nginx
+http {
+    log_format ltsv "time:$time_local"
+        "\thost:$remote_addr"
+        "\tforwardedfor:$http_x_forwarded_for"
+        "\treq:$request"
+        "\tmethod:$request_method"
+        "\turi:$request_uri"
+        "\tstatus:$status"
+        "\tsize:$body_bytes_sent"
+        "\treferer:$http_referer"
+        "\tua:$http_user_agent"
+        "\treqtime:$request_time"
+        "\truntime:$upstream_http_x_runtime"
+        "\tapptime:$upstream_response_time"
+        "\tcache:$upstream_http_x_cache"
+        "\tvhost:$host";
+
+    access_log /var/log/nginx/access.log ltsv;
+    # ...
+}
+```
+
+```sh
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**MySQL**: スローログを有効にします。`long_query_time=0` にすると全クエリが記録されます。`/etc/mysql/mysql.conf.d/mysqld.cnf`（MariaDB なら `/etc/mysql/mariadb.conf.d/50-server.cnf`）の `[mysqld]` に追記します。
+
+```ini
+[mysqld]
+slow_query_log=ON
+slow_query_log_file=/var/log/mysql/mysql-slow.log
+long_query_time=0
+```
+
+```sh
+sudo systemctl restart mysql
+```
+
+再起動したくない場合は、SQL で一時的に有効にもできます（MySQL を再起動すると元に戻ります）。
+
+```sql
+SET GLOBAL slow_query_log_file = '/var/log/mysql/mysql-slow.log';
+SET GLOBAL long_query_time = 0;
+SET GLOBAL slow_query_log = ON;
+```
+
+`long_query_time` の変更は、変更後に接続したセッションから効きます。アプリも再起動してください。
+
+スローログは既定で mysql ユーザーしか読めないことがあります。pprotein-agent を動かすユーザーが読めるか `ls -l /var/log/mysql/` で確認し、読めなければ `sudo chmod +r /var/log/mysql/mysql-slow.log` などで権限を付けてください。
 
 ### 3. アプリに integration を組み込む
 
@@ -282,6 +338,78 @@ pprotein が別のマシンにある場合は、URL をそのホストにする�
 | `start_collect` | 登録済みの全対象の計測を始める（`/api/group/collect` と同じ） |
 
 `group` を省略すると最新のグループが対象です。
+
+## 計測をやめる（agent を外す）
+
+競技の最終計測の前などに、計測対象サーバーから pprotein-agent を取り除く手順です。
+
+### 1. pprotein-agent を止めて削除する
+
+systemd に登録した場合は、停止・自動起動の解除をしてからユニットファイルを消します。
+
+```sh
+sudo systemctl disable --now pprotein-agent
+sudo rm /etc/systemd/system/pprotein-agent.service
+sudo systemctl daemon-reload
+```
+
+手で起動していた場合は、そのプロセスを止めます（`Ctrl+C` か `pkill pprotein-agent`）。
+
+最後にバイナリを消します。
+
+```sh
+rm ~/pprotein-agent
+```
+
+`systemctl status pprotein-agent` が `could not be found` になり、`curl http://localhost:19000/` がつながらなければ外れています。
+
+### 2. アプリから integration を外す
+
+integration を組み込んだままだと、アプリに `/debug/pprof/*` が残ります。不要になったら追加した部分を元に戻して、アプリをビルドし直します。
+
+- Rust: `Cargo.toml` の `pprotein-integration` と、ルーターに追加した 1 行（`.merge(pprotein_integration::axum::router())` / `.configure(pprotein_integration::actix::configure)`）を消す。`[profile.release]` の `debug = 1` も不要なら消す
+- Go: `echov4.Integrate(e)` などの呼び出しと import を消す
+
+### 3. pprotein 側の登録を消す
+
+pprotein の **setting** から、そのサーバーの対象（`Label` が同じもの）を削除します。残っていると、計測開始のたびに接続エラーになります。
+
+### 4. nginx / MySQL のログ設定を戻す
+
+ログの出力自体も負荷になるので、最終計測の前には止めておくのがおすすめです。
+
+**nginx**: `access_log` をオフにします（ログを残したい場合は `ltsv` を外して既定の形式に戻します）。`log_format ltsv` の定義は残っていても問題ありません。
+
+```nginx
+http {
+    access_log off;
+    # access_log /var/log/nginx/access.log;   # 残す場合
+}
+```
+
+```sh
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**MySQL**: 追記した 3 行を消すか、`slow_query_log=OFF` にして再起動します。
+
+```ini
+[mysqld]
+slow_query_log=OFF
+```
+
+```sh
+sudo systemctl restart mysql
+```
+
+再起動せずに止める場合は SQL で止めます（設定ファイルを直さないと、次の再起動で有効に戻ります）。
+
+```sql
+SET GLOBAL slow_query_log = OFF;
+SET GLOBAL long_query_time = 10;   -- 既定値に戻す
+```
+
+`SHOW VARIABLES LIKE 'slow_query_log';` が `OFF` なら止まっています。たまったログファイルが不要なら消してもかまいません。
 
 ## Rust 版の制限
 
