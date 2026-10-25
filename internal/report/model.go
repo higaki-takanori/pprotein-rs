@@ -12,7 +12,6 @@ type (
 		Top      int
 
 		Git      []GitInfo
-		Memos    []Memo
 		HTTP     []HTTPSection
 		SQL      []SQLSection
 		Profiles []ProfileSection
@@ -26,11 +25,6 @@ type (
 		Ref     string
 		Hash    string
 		Message string
-	}
-
-	Memo struct {
-		Label string
-		Text  string
 	}
 
 	// SkippedSnapshot は処理中・失敗などで集計に使えなかったスナップショット。

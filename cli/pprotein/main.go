@@ -10,6 +10,7 @@ import (
 	"github.com/kaz/pprotein/internal/event"
 	"github.com/kaz/pprotein/internal/extproc/alp"
 	"github.com/kaz/pprotein/internal/extproc/slp"
+	"github.com/kaz/pprotein/internal/mcpserver"
 	"github.com/kaz/pprotein/internal/memo"
 	"github.com/kaz/pprotein/internal/pprof"
 	"github.com/kaz/pprotein/internal/report"
@@ -104,12 +105,19 @@ func start() error {
 	}
 	grp.RegisterHandlers(api.Group("/group"))
 
-	report.NewHandler(&report.Sources{
+	reports := &report.Sources{
 		HTTPLog: alpHandler.Collector(),
 		SlowLog: slpHandler.Collector(),
 		PProf:   pprofHandler.Collector(),
-		Memo:    memoHandler.Collector(),
-	}).RegisterHandlers(api.Group("/report"))
+	}
+	report.NewHandler(reports).RegisterHandlers(api.Group("/report"))
+
+	// AI エージェント向けの MCP エンドポイント (Streamable HTTP)
+	e.Any("/mcp", echo.WrapHandler(mcpserver.NewHandler(mcpserver.Deps{
+		Reports:    reports,
+		CollectAll: grp.CollectAll,
+		AddMemo:    memoHandler.Add,
+	})))
 
 	return e.Start(":" + port)
 }

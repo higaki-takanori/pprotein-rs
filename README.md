@@ -227,7 +227,7 @@ tokio::spawn(async {
 
 ### 4. 結果を AI に渡す（レポート API）
 
-1 回の計測（`/api/group/collect` で集めた 1 グループ）の httplog / slowlog / pprof / memo を、1 つの Markdown にまとめて返します。合計時間の多い順に上位だけを載せるので、そのまま AI に渡せます。
+1 回の計測（`/api/group/collect` で集めた 1 グループ）の httplog / slowlog / pprof を、1 つの Markdown にまとめて返します。合計時間の多い順に上位だけを載せるので、そのまま AI に渡せます。
 
 ```sh
 # 最新の計測結果
@@ -253,9 +253,35 @@ curl "http://<pprotein のホスト>:9000/api/report/latest?compare=prev&top=20"
 - **Slow queries**: クエリ別の合計時間の多い順。割合、件数、平均、平均の参照行数（Rows examined）
 - **Profile**: 関数別の flat（関数自身の時間）と cum（呼び出し先を含む時間）の上位
 - **Diff**（`compare` 指定時）: 前回からの変化が大きい順。マイナスが改善
-- memo、git コミット、処理中・失敗で集計に入らなかったもの
+- git コミット、処理中・失敗で集計に入らなかったもの
+
+memo は AI に渡すとノイズになるので、レポートにも一覧にも含めません（Web 画面では見られます）。
 
 グループの一覧は `GET /api/report` で取れます（新しい順）。
+
+### 5. AI エージェントから使う（MCP）
+
+pprotein は `/mcp` で MCP サーバー（Streamable HTTP）としても動きます。AI エージェントが自分で一覧やレポートを取り、気になるエンドポイントやクエリを深掘りできます。
+
+```sh
+# Claude Code に登録する
+claude mcp add --transport http pprotein http://localhost:9000/mcp
+```
+
+pprotein が別のマシンにある場合は、URL をそのホストにするか、SSH ポートフォワードで手元の 9000 番につなぎます。
+
+| ツール | 内容 |
+|---|---|
+| `list_groups` | 計測（グループ）の一覧。新しい順 |
+| `get_report` | 1 回分のレポート（`/api/report/:group` と同じ）。`compare: "prev"` で差分付き |
+| `get_diff` | 2 回分の差分だけ。改善の確認に |
+| `get_http_stats` | エンドポイント別の集計。`sort`（sum / count / avg / p99 / max / 5xx）と `filter`（正規表現）で絞り込み |
+| `get_slow_queries` | クエリ別の集計。`sort`（sum / count / avg / max / rows_examined）と `filter`。クエリ全文も返す |
+| `get_profile` | pprof の関数別集計。`sort`（flat / cum）と `filter`（例: `^main\.` やクレート名で自分のコードだけにする） |
+| `add_memo` | グループに memo を追加する（スコアや変更内容を Web 画面に残す用。ツールの応答には出ない） |
+| `start_collect` | 登録済みの全対象の計測を始める（`/api/group/collect` と同じ） |
+
+`group` を省略すると最新のグループが対象です。
 
 ## Rust 版の制限
 

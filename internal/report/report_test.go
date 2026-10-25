@@ -81,7 +81,6 @@ func TestBuildMarkdownWithDiff(t *testing.T) {
 		HTTPLog: &fakeSource{},
 		SlowLog: &fakeSource{},
 		PProf:   &fakeSource{},
-		Memo:    &fakeSource{},
 		bodyPath: func(s *collect.Snapshot) (string, error) {
 			return filepath.Join(dir, s.ID), nil
 		},
@@ -102,7 +101,6 @@ func TestBuildMarkdownWithDiff(t *testing.T) {
 	add(src.SlowLog, "slowlog", "g2", "db", "s2", at, slpTSV)
 	writeProfile(t, dir, "p2", cur)
 	add(src.PProf, "pprof", "g2", "app", "p2", at, "")
-	add(src.Memo, "memo", "g2", "score", "m2", at, `{"Text":"score 12345"}`)
 	pending := entry("pprof", "g2", "app2", "p3", at, collect.StatusPending)
 	src.PProf.(*fakeSource).entries = append(src.PProf.(*fakeSource).entries, pending)
 
@@ -138,7 +136,6 @@ func TestBuildMarkdownWithDiff(t *testing.T) {
 	md := buf.String()
 	for _, want := range []string{
 		"# pprotein report: g2",
-		"- score: score 12345",
 		"## HTTP (alp): web",
 		"| 1 | 0.420 | 97.7% | 2 |",
 		"## Slow queries (slp): db",

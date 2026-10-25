@@ -10,10 +10,57 @@ import (
 // SQL は bundle_values しても長いことがあるので、Markdown では切り詰める (JSON では全文)
 const maxQueryLen = 300
 
-// WriteMarkdown はレポートを AI に渡しやすい Markdown で書き出す。
+// WriteMarkdown はレポート全体を AI に渡しやすい Markdown で書き出す。
 func (r *Report) WriteMarkdown(w io.Writer) error {
 	m := &mdWriter{w: w}
+	m.header(r)
+	m.line("- Tables show top %d rows. Times are in seconds. Share = share of the section total.", r.Top)
+	m.http(r.HTTP)
+	m.sql(r.SQL)
+	m.profiles(r.Profiles)
+	if r.Diff != nil {
+		m.diff(r.Diff)
+	}
+	m.skipped(r.Skipped)
+	return m.err
+}
 
+// WriteDiffMarkdown は見出しと差分だけを書き出す。
+func (r *Report) WriteDiffMarkdown(w io.Writer) error {
+	m := &mdWriter{w: w}
+	m.header(r)
+	if r.Diff == nil {
+		m.line("")
+		m.line("No group to compare with.")
+	} else {
+		m.diff(r.Diff)
+	}
+	m.skipped(r.Skipped)
+	return m.err
+}
+
+// WriteHTTPMarkdown / WriteSQLMarkdown / WriteProfileMarkdown は表だけを書き出す。
+// MCP の深掘りツールが並べ替え・絞り込みしたセクションを出すのに使う。
+func WriteHTTPMarkdown(w io.Writer, secs []HTTPSection) error {
+	m := &mdWriter{w: w}
+	m.http(secs)
+	return m.err
+}
+
+func WriteSQLMarkdown(w io.Writer, secs []SQLSection) error {
+	m := &mdWriter{w: w}
+	m.sql(secs)
+	return m.err
+}
+
+// 空の ByFlat / ByCum の表は出さない。
+func WriteProfileMarkdown(w io.Writer, secs []ProfileSection) error {
+	m := &mdWriter{w: w}
+	m.profiles(secs)
+	return m.err
+}
+
+func (m *mdWriter) header(r *Report) {
 	m.line("# pprotein report: %s", r.GroupID)
 	m.line("")
 	m.line("- Collected at: %s", r.Datetime.Format(time.RFC3339))
@@ -23,18 +70,10 @@ func (r *Report) WriteMarkdown(w io.Writer) error {
 	if r.Diff != nil {
 		m.line("- Compared with: %s (%s)", r.Diff.BaseGroupID, r.Diff.BaseDatetime.Format(time.RFC3339))
 	}
-	m.line("- Tables show top %d rows. Times are in seconds. Share = share of the section total.", r.Top)
+}
 
-	if len(r.Memos) > 0 {
-		m.line("")
-		m.line("## Memo")
-		m.line("")
-		for _, memo := range r.Memos {
-			m.line("- %s: %s", memo.Label, oneLine(memo.Text))
-		}
-	}
-
-	for _, sec := range r.HTTP {
+func (m *mdWriter) http(secs []HTTPSection) {
+	for _, sec := range secs {
 		m.line("")
 		m.line("## HTTP (alp): %s", sec.Label)
 		m.line("")
@@ -48,8 +87,10 @@ func (r *Report) WriteMarkdown(w io.Writer) error {
 				cell(row.Method), code(row.URI))
 		}
 	}
+}
 
-	for _, sec := range r.SQL {
+func (m *mdWriter) sql(secs []SQLSection) {
+	for _, sec := range secs {
 		m.line("")
 		m.line("## Slow queries (slp): %s", sec.Label)
 		m.line("")
@@ -63,46 +104,53 @@ func (r *Report) WriteMarkdown(w io.Writer) error {
 				code(truncate(row.Query, maxQueryLen)))
 		}
 	}
+}
 
-	for _, sec := range r.Profiles {
+func (m *mdWriter) profiles(secs []ProfileSection) {
+	for _, sec := range secs {
 		m.line("")
 		m.line("## Profile (pprof): %s", sec.Label)
 		m.line("")
 		m.line("Sample: %s (%s), duration %s, total %s", sec.SampleType, sec.Unit, sec.Duration, formatValue(sec.Total, sec.Unit))
-		m.line("")
-		m.line("### Top by flat (time spent in the function itself)")
-		m.line("")
-		writeProfileRows(m, sec.ByFlat, sec.Unit)
-		m.line("")
-		m.line("### Top by cum (including callees)")
-		m.line("")
-		writeProfileRows(m, sec.ByCum, sec.Unit)
-	}
-
-	if r.Diff != nil {
-		m.line("")
-		m.line("## Diff from %s", r.Diff.BaseGroupID)
-		m.line("")
-		m.line("Rows are sorted by the absolute change. Negative Delta means improvement.")
-		writeDiff(m, "HTTP", r.Diff.HTTP, "Count", "Sum")
-		writeDiff(m, "Slow queries", r.Diff.SQL, "Count", "Sum")
-		writeDiff(m, "Profile flat", r.Diff.Profiles, "", "Flat")
-		if len(r.Diff.HTTP)+len(r.Diff.SQL)+len(r.Diff.Profiles) == 0 {
+		if len(sec.ByFlat) > 0 {
 			m.line("")
-			m.line("No sections with the same label in both groups.")
+			m.line("### Top by flat (time spent in the function itself)")
+			m.line("")
+			writeProfileRows(m, sec.ByFlat, sec.Unit)
+		}
+		if len(sec.ByCum) > 0 {
+			m.line("")
+			m.line("### Top by cum (including callees)")
+			m.line("")
+			writeProfileRows(m, sec.ByCum, sec.Unit)
 		}
 	}
+}
 
-	if len(r.Skipped) > 0 {
+func (m *mdWriter) diff(d *Diff) {
+	m.line("")
+	m.line("## Diff from %s", d.BaseGroupID)
+	m.line("")
+	m.line("Rows are sorted by the absolute change. Negative Delta means improvement.")
+	writeDiff(m, "HTTP", d.HTTP, "Count", "Sum")
+	writeDiff(m, "Slow queries", d.SQL, "Count", "Sum")
+	writeDiff(m, "Profile flat", d.Profiles, "", "Flat")
+	if len(d.HTTP)+len(d.SQL)+len(d.Profiles) == 0 {
 		m.line("")
-		m.line("## Not included")
-		m.line("")
-		for _, s := range r.Skipped {
-			m.line("- %s %s (%s): %s %s", s.Type, s.Label, s.ID, s.Status, oneLine(s.Message))
-		}
+		m.line("No sections with the same label in both groups.")
 	}
+}
 
-	return m.err
+func (m *mdWriter) skipped(skipped []SkippedSnapshot) {
+	if len(skipped) == 0 {
+		return
+	}
+	m.line("")
+	m.line("## Not included")
+	m.line("")
+	for _, s := range skipped {
+		m.line("- %s %s (%s): %s %s", s.Type, s.Label, s.ID, s.Status, oneLine(s.Message))
+	}
 }
 
 func writeProfileRows(m *mdWriter, rows []ProfileRow, unit string) {

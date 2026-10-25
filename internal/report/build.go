@@ -7,7 +7,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/goccy/go-json"
 	"github.com/kaz/pprotein/internal/collect"
 )
 
@@ -22,14 +21,13 @@ type (
 		HTTPLog Source
 		SlowLog Source
 		PProf   Source
-		Memo    Source
 
 		// テスト用。nil なら Snapshot.BodyPath を使う。
 		bodyPath func(*collect.Snapshot) (string, error)
 	}
 
 	Options struct {
-		Top     int    // 各表の行数
+		Top     int    // 各表の行数。0 なら DefaultTop、負なら全行
 		Compare string // "", "none", "prev", またはグループID
 	}
 
@@ -57,7 +55,8 @@ var ErrGroupNotFound = fmt.Errorf("group not found")
 
 func (s *Sources) entries() []*collect.Entry {
 	var all []*collect.Entry
-	for _, src := range []Source{s.HTTPLog, s.SlowLog, s.PProf, s.Memo} {
+	// memo は AI に渡すとノイズになるので、一覧にもレポートにも含めない
+	for _, src := range []Source{s.HTTPLog, s.SlowLog, s.PProf} {
 		if src != nil {
 			all = append(all, src.List()...)
 		}
@@ -111,7 +110,7 @@ func (s *Sources) Groups() []GroupSummary {
 
 // Build は groupID ("latest" 可) のレポートを作る。
 func (s *Sources) Build(groupID string, opts Options) (*Report, error) {
-	if opts.Top <= 0 {
+	if opts.Top == 0 {
 		opts.Top = DefaultTop
 	}
 
@@ -270,18 +269,6 @@ func (s *Sources) loadEntry(l *loaded, ent *collect.Entry) error {
 		}
 		l.profiles[label] = &loadedProfile{id: snap.ID, data: data}
 		l.profileLabels = append(l.profileLabels, label)
-
-	case "memo":
-		r, err := s.Memo.Get(snap.ID)
-		if err != nil {
-			return err
-		}
-		defer r.Close()
-		var v struct{ Text string }
-		if err := json.NewDecoder(r).Decode(&v); err != nil {
-			return fmt.Errorf("failed to decode memo: %w", err)
-		}
-		l.report.Memos = append(l.report.Memos, Memo{Label: label, Text: v.Text})
 	}
 	return nil
 }
