@@ -119,7 +119,7 @@ func (s *Snapshot) Add(content []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
-	if err := s.store.Put(s.ID, s.Type, serialized); err != nil {
+	if err := s.store.Put(s.Type, s.ID, serialized); err != nil {
 		return fmt.Errorf("failed to write meta: %w", err)
 	}
 	if err := s.store.PutFile(s.ID, content); err != nil {

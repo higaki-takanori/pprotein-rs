@@ -46,6 +46,11 @@ func (h *handler) Register(g *echo.Group) error {
 	return nil
 }
 
+// Collector は Register 後に有効になる。
+func (h *handler) Collector() *collect.Collector {
+	return h.collector
+}
+
 func (h *handler) getIndex(c echo.Context) error {
 	list := h.collector.List()
 	for _, m := range list {
@@ -73,34 +78,38 @@ func (h *handler) postIndex(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("failed to parse request body: %v", err))
 	}
 
+	if err := h.Add(req.GroupId, req.Label, req.Text); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return c.NoContent(http.StatusAccepted)
+}
+
+// Add はグループに memo を追加し、画面に通知する。
+func (h *handler) Add(groupID, label, text string) error {
 	target := &collect.SnapshotTarget{
-		GroupId: req.GroupId,
-		Label:   req.Label,
+		GroupId: groupID,
+		Label:   label,
 	}
 
-	v := &textValue{
-		Text: req.Text,
-	}
-	buf, err := json.Marshal(v)
+	buf, err := json.Marshal(&textValue{Text: text})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to marshal textValue: %v", err))
+		return fmt.Errorf("failed to marshal textValue: %w", err)
 	}
 	snapshot, err := h.collector.Add(target, buf)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("failed to add snapshot: %v", err))
+		return fmt.Errorf("failed to add snapshot: %w", err)
 	}
 
 	eventData, err := json.Marshal(&collect.Entry{
 		Snapshot: snapshot,
 		Status:   "ok",
-		Message:  req.Text,
+		Message:  text,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to marshal entry: %v", err))
+		return fmt.Errorf("failed to marshal entry: %w", err)
 	}
 	h.opts.EventHub.Publish(eventData)
-
-	return c.NoContent(http.StatusAccepted)
+	return nil
 }
 
 func (h *handler) getId(c echo.Context) error {

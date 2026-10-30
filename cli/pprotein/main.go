@@ -10,8 +10,10 @@ import (
 	"github.com/kaz/pprotein/internal/event"
 	"github.com/kaz/pprotein/internal/extproc/alp"
 	"github.com/kaz/pprotein/internal/extproc/slp"
+	"github.com/kaz/pprotein/internal/mcpserver"
 	"github.com/kaz/pprotein/internal/memo"
 	"github.com/kaz/pprotein/internal/pprof"
+	"github.com/kaz/pprotein/internal/report"
 	"github.com/kaz/pprotein/internal/storage"
 	"github.com/kaz/pprotein/view"
 	"github.com/labstack/echo/v4"
@@ -53,7 +55,8 @@ func start() error {
 		Store:    store,
 		EventHub: hub,
 	}
-	if err := pprof.NewHandler(pprofOpts).Register(api.Group("/pprof")); err != nil {
+	pprofHandler := pprof.NewHandler(pprofOpts)
+	if err := pprofHandler.Register(api.Group("/pprof")); err != nil {
 		return err
 	}
 
@@ -91,7 +94,8 @@ func start() error {
 		Store:    store,
 		EventHub: hub,
 	}
-	if err := memo.NewHandler(memoOpts).Register(api.Group("/memo")); err != nil {
+	memoHandler := memo.NewHandler(memoOpts)
+	if err := memoHandler.Register(api.Group("/memo")); err != nil {
 		return err
 	}
 
@@ -100,6 +104,20 @@ func start() error {
 		return err
 	}
 	grp.RegisterHandlers(api.Group("/group"))
+
+	reports := &report.Sources{
+		HTTPLog: alpHandler.Collector(),
+		SlowLog: slpHandler.Collector(),
+		PProf:   pprofHandler.Collector(),
+	}
+	report.NewHandler(reports).RegisterHandlers(api.Group("/report"))
+
+	// AI エージェント向けの MCP エンドポイント (Streamable HTTP)
+	e.Any("/mcp", echo.WrapHandler(mcpserver.NewHandler(mcpserver.Deps{
+		Reports:    reports,
+		CollectAll: grp.CollectAll,
+		AddMemo:    memoHandler.Add,
+	})))
 
 	return e.Start(":" + port)
 }

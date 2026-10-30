@@ -41,6 +41,11 @@ func (h *handler) Register(g *echo.Group) error {
 	return nil
 }
 
+// Collector は Register 後に有効になる。
+func (h *handler) Collector() *collect.Collector {
+	return h.collector
+}
+
 func (h *handler) getIndex(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.collector.List())
 }

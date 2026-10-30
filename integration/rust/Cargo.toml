@@ -1,0 +1,40 @@
+[package]
+name = "pprotein-integration"
+version = "0.1.0"
+edition = "2021"
+description = "pprotein integration for Rust web apps (CPU profiling via pprof-rs)"
+license = "MIT"
+repository = "https://github.com/higaki-takanori/pprotein-rs"
+
+[features]
+default = []
+# 利用する Web フレームワークに合わせてどちらか（または両方）を有効にする
+axum = ["dep:axum"]
+actix = ["dep:actix-web"]
+
+[dependencies]
+pprof = { version = "0.15", features = ["prost-codec", "flamegraph"] }
+flate2 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "time"] }
+
+axum = { version = "0.8", optional = true, default-features = false, features = ["query", "tokio"] }
+actix-web = { version = "4.9", optional = true, default-features = false, features = ["macros"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+actix-web = "4.9"
+
+[[example]]
+name = "axum"
+required-features = ["axum"]
+
+[[example]]
+name = "actix"
+required-features = ["actix"]
+
+# examples でも関数名が出るようにデバッグ情報を残す
+[profile.release]
+debug = 1

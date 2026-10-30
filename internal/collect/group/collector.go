@@ -84,14 +84,23 @@ func (cl *Collector) sanitize(raw []byte) ([]byte, error) {
 }
 
 func (cl *Collector) collectAll(c echo.Context) error {
+	if _, _, err := cl.CollectAll(); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusOK)
+}
+
+// CollectAll は登録済みのすべての対象の収集を新しいグループで始める。
+// 収集自体は裏で進み、各対象の Duration 秒後に終わる。
+func (cl *Collector) CollectAll() (string, []*CollectTarget, error) {
 	raw, err := cl.targets.GetContent()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to get config: %v", err))
+		return "", nil, fmt.Errorf("failed to get config: %w", err)
 	}
 
 	targets := []*CollectTarget{}
 	if err := json.Unmarshal(raw, &targets); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal: %v", err))
+		return "", nil, fmt.Errorf("failed to unmarshal: %w", err)
 	}
 
 	grpId := time.Now().Format("2006-01-02_15-04-05.999999")
@@ -108,9 +117,9 @@ func (cl *Collector) collectAll(c echo.Context) error {
 	}
 
 	if err := eg.Wait(); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to collect: %v", err))
+		return "", nil, fmt.Errorf("failed to collect: %w", err)
 	}
-	return c.NoContent(http.StatusOK)
+	return grpId, targets, nil
 }
 func (cl *Collector) makeInternalRequest(grpId string, target CollectTarget) error {
 	body, err := json.Marshal(&collect.SnapshotTarget{
