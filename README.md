@@ -52,6 +52,28 @@ go install github.com/tkuchiki/alp/cmd/alp@latest
 go install github.com/tkuchiki/slp/cmd/slp@latest
 ```
 
+`go install` したコマンドは `~/go/bin` に入ります。`which alp slp` で見つからない場合は PATH に追加し、そのターミナルで pprotein を起動してください。
+
+```sh
+echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Linux では、リリースされているバイナリを `/usr/local/bin` に置きます。systemd で pprotein を動かす場合も、ここなら PATH が通っています。
+
+```sh
+# Linux の例（ARM の場合は amd64 を arm64 に置き換える）
+sudo apt-get install -y graphviz
+cd /tmp
+curl -fsSL -o alp.tar.gz https://github.com/tkuchiki/alp/releases/latest/download/alp_linux_amd64.tar.gz
+curl -fsSL -o slp.tar.gz https://github.com/tkuchiki/slp/releases/latest/download/slp_linux_amd64.tar.gz
+tar xzf alp.tar.gz && tar xzf slp.tar.gz
+sudo install alp slp /usr/local/bin/
+which alp slp dot    # 3 つとも表示されれば OK
+```
+
+> `exec: "alp": executable file not found in $PATH`（slp も同様）と出る場合は、**pprotein を動かしているマシン**に alp / slp が入っていないか、PATH が通っていません。インストール後に pprotein を再起動してください。
+
 > `Could not execute dot; may need to install graphviz.` と出る場合は、graphviz が入っていません。インストール後に pprotein を再起動してください。
 
 ```sh
@@ -242,7 +264,44 @@ pprotein の画面（`http://<pprotein のホスト>:9000`）の **setting** で
 
 #### 手元の PC で pprotein を動かす場合
 
-計測対象サーバーの 8080 / 19000 番ポートが外から開いていない場合は、SSH のポートフォワードで手元につなぎます。
+pprotein は計測対象サーバーの 2 つのポートにアクセスします。
+
+| ポート | 相手 | 取るもの |
+| --- | --- | --- |
+| 8080 | アプリ（integration） | pprof |
+| 19000 | pprotein-agent | httplog / slowlog |
+
+クラウドのサーバーは、普通これらのポートが外から閉じています。`curl http://<計測対象>:19000/debug/log/httplog` が `Failed to connect ... Couldn't connect to server`（タイムアウト）になる場合は、次のどちらかでつなぎます。
+
+**A. ポートを開ける（AWS の例）**
+
+1. EC2 コンソール → インスタンス → 計測対象を選ぶ → **セキュリティ** タブ → セキュリティグループのリンクを開く
+2. **インバウンドルールを編集** → **ルールを追加** で次の 2 つを追加して保存する
+
+   | タイプ | ポート範囲 | ソース |
+   | --- | --- | --- |
+   | カスタム TCP | 8080 | マイ IP |
+   | カスタム TCP | 19000 | マイ IP |
+
+3. 手元の PC から届くか確認する
+
+   ```sh
+   curl -s -o /dev/null -w '%{http_code}\n' http://<計測対象>:19000/debug/log/httplog   # 200
+   curl -s -o /tmp/p.pb.gz "http://<計測対象>:8080/debug/pprof/profile?seconds=3" && file /tmp/p.pb.gz   # gzip compressed data
+   ```
+
+setting の `URL` には、サーバーのパブリック IP を指定します（例: `http://<パブリック IP>:8080/debug/pprof/profile`、`http://<パブリック IP>:19000/debug/log/httplog`）。
+
+- ソースは必ず **マイ IP** にします。`0.0.0.0/0`（全開放）にすると、アクセスログやスロークエリ、プロファイルを誰でも取得できてしまいます。
+- 自宅などの IP が変わると届かなくなります。そのときはルールのソースを「マイ IP」で選び直してください。
+- EC2 を停止・起動するとパブリック IP が変わります（Elastic IP を付けている場合を除く）。変わったら setting の `URL` も直します。
+- アプリが 8080 以外のポートで動いている場合は、`ss -ltnp` で確認してそのポートを開けます。
+- サーバー内でも `ufw` などのファイアウォールが動いている場合は、そちらも開けます（`sudo ufw allow from <手元の IP> to any port 8080,19000 proto tcp`）。
+- 計測が終わったら、追加したルールは削除してください。
+
+**B. SSH のポートフォワードを使う**
+
+ポートを開けずに済みます。SSH をつないでいる間だけ計測できます。
 
 ```sh
 ssh -L 8080:localhost:8080 -L 19000:localhost:19000 isucon@<計測対象>
