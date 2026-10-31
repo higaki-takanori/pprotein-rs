@@ -34,7 +34,7 @@ type (
 
 const instructions = `pprotein collects performance data for ISUCON-style tuning.
 One benchmark run is a "group" that holds: httplog (nginx access log aggregated by alp),
-slowlog (MySQL slow query log aggregated by slp) and pprof (CPU profile).
+slowlog (PostgreSQL slow query log aggregated by slp) and pprof (CPU profile).
 
 Typical workflow:
 1. list_groups to see recent runs.

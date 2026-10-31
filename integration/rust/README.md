@@ -60,7 +60,7 @@ pprotein 本体の起動方法などは、リポジトリ直下の [README](../.
 
 ## httplog / slowlog
 
-nginx / MySQL のログ配信は言語に依存しないため、Go 製の `pprotein-agent`（既定ポート 19000）を併用してください。
+nginx / PostgreSQL のログ配信は言語に依存しないため、Go 製の `pprotein-agent`（既定ポート 19000）を併用してください。
 
 ```json
 [

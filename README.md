@@ -6,7 +6,7 @@ ISUCON 向けの計測ツール [pprotein](https://github.com/kaz/pprotein) に�
 | --- | --- |
 | pprof | アプリの CPU プロファイル |
 | httplog | nginx のアクセスログ（alp で集計） |
-| slowlog | MySQL のスロークエリログ（slp で集計） |
+| slowlog | PostgreSQL のスロークエリログ（slp で集計） |
 
 ## 構成
 
@@ -17,7 +17,7 @@ Mac                                   Linux サーバー
 ┌────────────────┐   SSH でつなぐ    ┌──────────────────────────┐
 │ ./pprotein     │ ◀──────────────▶ │ アプリ    :8080（例）      │
 │ :9000          │                  │ ./pprotein-agent :19000  │
-└────────────────┘                  │ nginx / MySQL のログ      │
+└────────────────┘                  │ nginx / PostgreSQL のログ │
                                     └──────────────────────────┘
 ```
 
@@ -71,6 +71,8 @@ Description=pprotein-agent
 [Service]
 ExecStart=/home/isucon/pprotein-agent
 WorkingDirectory=/home/isucon/webapp
+# PostgreSQL のログ（<版> は ls /var/log/postgresql/ で確認。例: 16）
+Environment=PPROTEIN_SLOWLOG=/var/log/postgresql/postgresql-main.log
 Restart=always
 
 [Install]
@@ -86,7 +88,7 @@ sudo systemctl enable --now pprotein-agent
 
 `WorkingDirectory` をアプリの git リポジトリにしておくと、結果にコミットが表示されます。
 
-### 3. nginx / MySQL のログを出す【サーバー】
+### 3. nginx / PostgreSQL のログを出す【サーバー】
 
 **nginx**: `/etc/nginx/nginx.conf` の `http { ... }` にある `access_log` を LTSV 形式に置き換えます。
 
@@ -109,21 +111,22 @@ log_format ltsv "time:$time_local"
 access_log /var/log/nginx/access.log ltsv;
 ```
 
-**MySQL**: `/etc/mysql/mysql.conf.d/mysqld.cnf` の `[mysqld]` に追記します。
+**PostgreSQL**: `/etc/postgresql/<版>/main/postgresql.conf` の末尾に追記します。
 
 ```ini
-slow_query_log=ON
-slow_query_log_file=/var/log/mysql/mysql-slow.log
-long_query_time=0
+log_min_duration_statement = 0     # すべてのクエリを実行時間つきで記録する
+log_line_prefix = '%m [%p] '       # slp が読める形式にする
 ```
+
+`log_line_prefix` は必ずこの値にしてください。Ubuntu の既定値（`'%m [%p] %q%u@%d '`）のままだと、エラーにならずに集計結果が空になります。
 
 ```sh
 # 【サーバー】
 sudo nginx -t && sudo systemctl reload nginx
-sudo systemctl restart mysql
-sudo chmod +r /var/log/mysql/mysql-slow.log   # agent が読めるようにする
+sudo systemctl restart postgresql
 ```
 
+slowlog は、`PPROTEIN_SLOWLOG` を指定しなければ `/var/log/postgresql/` にある PostgreSQL のログ（`postgresql-<版>-main.log` など）を agent が自動で探します。複数あるときは最後に更新されたものを使います。
 ログの場所が違う場合は、agent の環境変数 `PPROTEIN_HTTPLOG` / `PPROTEIN_SLOWLOG` で指定します。
 
 ### 4. アプリに組み込む【アプリのリポジトリ】
@@ -270,7 +273,7 @@ sudo systemctl daemon-reload
 
 - アプリから integration と initialize の collect を消し、ビルド・再起動する
 - env ファイルまたは `systemctl edit` で追加した `PPROTEIN_COLLECT_URL` を消す
-- nginx の `access_log` を `off` に、MySQL の `slow_query_log` を `OFF` にして再起動する
+- nginx の `access_log` を `off` に、PostgreSQL の `log_min_duration_statement` を `-1` にして再起動する
 
 ## Rust 版の制限
 
