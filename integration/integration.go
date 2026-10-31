@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"path/filepath"
 
 	"github.com/felixge/fgprof"
 	"github.com/goccy/go-json"
@@ -15,7 +16,7 @@ import (
 
 var (
 	httplogPath       = getEnvOrDefault("PPROTEIN_HTTPLOG", "/var/log/nginx/access.log")
-	slowlogPath       = getEnvOrDefault("PPROTEIN_SLOWLOG", "/var/log/mysql/mysql-slow.log")
+	slowlogPath       = getEnvOrDefault("PPROTEIN_SLOWLOG", findPostgresLog())
 	gitRepositoryPath = getEnvOrDefault("PPROTEIN_GIT_REPOSITORY", ".")
 )
 
@@ -66,4 +67,27 @@ func getEnvOrDefault(key string, def string) string {
 		return def
 	}
 	return v
+}
+
+// findPostgresLog は /var/log/postgresql/ にある PostgreSQL のログ
+// (postgresql-<版>-main.log など) を探す。複数あれば最後に更新されたものを使う。
+func findPostgresLog() string {
+	const fallback = "/var/log/postgresql/postgresql-16-main.log"
+
+	paths, _ := filepath.Glob("/var/log/postgresql/postgresql*.log")
+	best := ""
+	var bestTime int64
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		if t := info.ModTime().UnixNano(); best == "" || t > bestTime {
+			best, bestTime = p, t
+		}
+	}
+	if best == "" {
+		return fallback
+	}
+	return best
 }
